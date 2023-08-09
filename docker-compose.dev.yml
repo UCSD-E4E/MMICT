@@ -1,0 +1,28 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - 8080:80
+
+  ip-service:
+    build: ./ip-service/ip-docker
+
+  classification-service:
+    build: ./classification-service
+    container_name: classification-service
+
+  web:
+    build: ./webserver
+    ports:
+      - 8081:80
+    depends_on:
+      - db
+  db:
+    image: mongo
+    container_name: mongo
+    volumes:
+      - mongo-db:/data/db # named volume - name:path
+
+# need to do this for named volumes since can be used across multiple services
+volumes:
+  mongo-db: 

@@ -1,0 +1,12 @@
+[submodule "webserver"]
+	path = webserver
+	url = git@github.com:UCSD-E4E/MMICT-web_server.git
+[submodule "frontend"]
+	path = frontend
+	url = git@github.com:UCSD-E4E/MMICT-frontend.git
+[submodule "classification-service"]
+	path = classification-service
+	url = git@github.com:UCSD-E4E/MMICT-classification_service.git
+[submodule "ip-service"]
+	path = ip-service
+	url = git@github.com:UCSD-E4E/MMICT-ip_service.git
