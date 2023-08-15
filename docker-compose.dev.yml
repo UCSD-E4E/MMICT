@@ -1,4 +1,16 @@
 services:
+  reverse-proxy:
+    image: nginx:1.17.10
+    container_name: reverse_proxy_demo
+    depends_on:
+        - frontend
+        - web
+    volumes:
+      - ./reverse_proxy/nginx.conf:/etc/nginx/nginx.conf
+    ports:
+    # Ports for http 
+      - 80:80
+
   frontend:
     build: ./frontend
     ports:
