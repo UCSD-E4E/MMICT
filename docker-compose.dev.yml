@@ -1,27 +1,55 @@
-services:
+# Application compose file for Mangrove Monitoring, we will be having a zero-trust setup where containers that do not need to communicate do not communicate
+services:  
   frontend:
     build: ./frontend
+    container_name: frontend
     ports:
-      - 8080:80
+      - 8081:80
+    environment:
+      - REACT_APP_API_SERVER_URL=http://localhost:8000
+    depends_on:
+      - webserver
+  
+  # Make sure you have a .env file with env variables set for AWS secret credentials
+  webserver:
+    build: ./webserver
+    container_name: webserver
+    ports:
+      - 8082:80
+    depends_on:
+      - db
+    environment:
+      - PORT=81
+      - MONGO_CONNECTION_STRING=mongodb://mongo:27017/mmict-test
+      - AWS_REGION=${AWS_REGION}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+  
+  db:
+    image: mongo
+    container_name: mongo_db
+    ports:
+      - 27017:27017
+    volumes:
+      - mongo-db:/data/db # named volume - name:path
 
   ip-service:
-    build: ./ip-service/ip-docker
+    build: ./ip-service
+    container_name: image_processing_service
+    ports:
+     - 8080:5000
 
   classification-service:
     build: ./classification-service
-    container_name: classification-service
-
-  web:
-    build: ./webserver
+    container_name: classification_service
     ports:
-      - 8081:80
-    depends_on:
-      - db
-  db:
-    image: mongo
-    container_name: mongo
-    volumes:
-      - mongo-db:/data/db # named volume - name:path
+     - 5001:5001
+
+networks:
+  default:
+    name: mmict_bridge
+    external: true
 
 # need to do this for named volumes since can be used across multiple services
 volumes:
