@@ -1,5 +1,6 @@
 # Application compose file for Mangrove Monitoring
-# This is the dev compose file for dev and testing purposes, all containers run on a single Docker host on one network
+# This compose file is for use in a Docker swarm, we will be having a zero-trust setup where containers that do not need to communicate do not communicate
+# We use default overlay networks to segment parts of our application here!
 
 services:  
   frontend:
@@ -11,6 +12,8 @@ services:
       - REACT_APP_API_SERVER_URL=http://localhost:8000
     depends_on:
       - webserver
+    networks:
+      - webserver-frontend
   
   # Make sure you have a .env file with env variables set for AWS secret credentials
   webserver:
@@ -27,6 +30,10 @@ services:
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    networks:
+      - webserver-frontend
+      - webserver-image
+      - webserver-mongo
   
   db:
     image: mongo
@@ -35,24 +42,38 @@ services:
       - 27017:27017
     volumes:
       - mongo-db:/data/db # named volume - name:path
+    networks:
+      - webserver-mongo
 
   ip-service:
     build: ./ip-service
     container_name: image_processing_service
     ports:
      - 8080:5000
+    networks:
+      - webserver-image
+      - image-classification
 
   classification-service:
     build: ./classification-service
     container_name: classification_service
     ports:
      - 5001:5001
+    networks:
+      - image-classification
 
 networks:
-  default:
-    name: mmict_bridge
-    external: true
+  image-classification:
+    driver: overlay
+  webserver-image:
+    driver: overlay
+  webserver-mongo:
+    driver: overlay
+  webserver-frontend:
+    driver: overlay
 
 # need to do this for named volumes since can be used across multiple services
 volumes:
   mongo-db: 
+
+# We will be adding related AWS stuff here later on when we deploy Docker Swarm to AWS ECS potentially
