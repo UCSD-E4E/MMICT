@@ -25,7 +25,7 @@ services:
       - db
     environment:
       - PORT=81
-      - MONGO_CONNECTION_STRING=mongodb://mongo:27017/mmict-test
+      - MONGO_CONNECTION_STRING=mongodb://mongo_db:27017/mmict-test
       - AWS_REGION=${AWS_REGION}
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
