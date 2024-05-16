@@ -9,7 +9,7 @@ services:
     ports:
       - 8081:80
     environment:
-      - WEBSERVER_ADDRESS=localhost:8082
+      - WEBSERVER_ADDRESS=webserver:8082
     depends_on:
       - webserver
   
@@ -21,17 +21,16 @@ services:
       - 8082:80
     depends_on:
       - db
+      - ip-service
     environment:
       - PORT=80
       - MONGO_CONNECTION_STRING=mongodb://mongo_db:27017/mmict-test
-      - FRONTEND_ADDRESS=localhost:8081
-      - IP_ADDRESS=localhost:5002
+      - FRONTEND_ADDRESS=frontend:8081
+      - IP_ADDRESS=image_processing_service:5002 # ultilize Docker DNS resolution to resolve address of IP_service
       - AWS_REGION=${AWS_REGION}
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-    networks:
-      - mmict_bridge
   
   db:
     image: mongo
@@ -40,8 +39,6 @@ services:
       - 27017:27017
     volumes:
       - mongo-db:/data/db # named volume - name:path
-    networks:
-      - mmict_bridge
 
   ip-service:
     build: ./ip-service
@@ -50,20 +47,17 @@ services:
      - 5002:5002
     environment:
       - PORT=5002
-      - HOST_IP=localhost
-      - WEBSERVER_ADDRESS=localhost:8082
-    networks:
-      - mmict_bridge
+      - HOST_IP=0.0.0.0
+      - WEBSERVER_ADDRESS=webserver:8082
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
 
-  classification-service:
-    build: ./classification-service
-    container_name: classification_service
-    ports:
-     - 5001:5001
-
-networks:
-  mmict_bridge:
-
+  # classification-service:
+  #   build: ./classification-service
+  #   container_name: classification_service
+  #   ports:
+  #    - 5001:5001
 
 # need to do this for named volumes since can be used across multiple services
 volumes:
