@@ -3,13 +3,12 @@
 # IP addresses and port numbers are hardcoded here for local dev purposes
 
 services:  
+  # define env in seperate .env file in container
   frontend:
     build: ./frontend
     container_name: frontend
     ports:
       - 8081:80
-    environment:
-      - WEBSERVER_ADDRESS=webserver:8082
     depends_on:
       - webserver
   
@@ -25,7 +24,7 @@ services:
     environment:
       - PORT=80
       - MONGO_CONNECTION_STRING=mongodb://mongo_db:27017/mmict-test
-      - FRONTEND_ADDRESS=frontend:8081
+      - FRONTEND_ADDRESS=frontend:80
       - IP_ADDRESS=image_processing_service:5002 # ultilize Docker DNS resolution to resolve address of IP_service
       - AWS_REGION=${AWS_REGION}
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
@@ -48,7 +47,7 @@ services:
     environment:
       - PORT=5002
       - HOST_IP=0.0.0.0
-      - WEBSERVER_ADDRESS=webserver:8082
+      - WEBSERVER_ADDRESS=webserver:80
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
