@@ -11,13 +11,15 @@ services:
       - 8081:80
     depends_on:
       - webserver
-  
+    environment:
+      - PORT=80
+      - WEBSERVER_ADDRESS=webserver:80
+      - REACT_APP_NGINX_ADDRESS=localhost:8081
+      
   # Make sure you have a .env file with env variables set for AWS secret credentials
   webserver:
     build: ./webserver
     container_name: webserver
-    ports:
-      - 8082:80
     depends_on:
       - db
       - ip-service
@@ -34,16 +36,12 @@ services:
   db:
     image: mongo
     container_name: mongo_db
-    ports:
-      - 27017:27017
     volumes:
       - mongo-db:/data/db # named volume - name:path
 
   ip-service:
     build: ./ip-service
     container_name: image_processing_service
-    ports:
-     - 5002:5002
     environment:
       - PORT=5002
       - HOST_IP=0.0.0.0
@@ -51,12 +49,6 @@ services:
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-
-  # classification-service:
-  #   build: ./classification-service
-  #   container_name: classification_service
-  #   ports:
-  #    - 5001:5001
 
 # need to do this for named volumes since can be used across multiple services
 volumes:
