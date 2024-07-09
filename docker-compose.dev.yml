@@ -1,27 +1,54 @@
-services:
+# Application compose file for Mangrove Monitoring
+# This is the dev compose file for dev and testing purposes, all containers run on a single Docker host on the default bridge network. 
+# IP addresses and port numbers are hardcoded here for local dev purposes
+
+services:  
+  # define env in seperate .env file in container
   frontend:
     build: ./frontend
-    ports:
-      - 8080:80
-
-  ip-service:
-    build: ./ip-service/ip-docker
-
-  classification-service:
-    build: ./classification-service
-    container_name: classification-service
-
-  web:
-    build: ./webserver
+    container_name: frontend
     ports:
       - 8081:80
     depends_on:
+      - webserver
+    environment:
+      - PORT=80
+      - WEBSERVER_ADDRESS=webserver:80
+      - REACT_APP_NGINX_ADDRESS=localhost:8081
+      
+  # Make sure you have a .env file with env variables set for AWS secret credentials
+  webserver:
+    build: ./webserver
+    container_name: webserver
+    depends_on:
       - db
+      - ip-service
+    environment:
+      - PORT=80
+      - MONGO_CONNECTION_STRING=mongodb://mongo_db:27017/mmict-test
+      - FRONTEND_ADDRESS=frontend:80
+      - IP_ADDRESS=image_processing_service:5002 # ultilize Docker DNS resolution to resolve address of IP_service
+      - AWS_REGION=${AWS_REGION}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+  
   db:
     image: mongo
-    container_name: mongo
+    container_name: mongo_db
     volumes:
       - mongo-db:/data/db # named volume - name:path
+
+  ip-service:
+    build: ./ip-service
+    container_name: image_processing_service
+    environment:
+      - PORT=5002
+      - HOST_IP=0.0.0.0
+      - WEBSERVER_ADDRESS=webserver:80
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
 
 # need to do this for named volumes since can be used across multiple services
 volumes:

@@ -1,0 +1,73 @@
+# Application compose file for Mangrove Monitoring
+# This compose file is for use in a Docker swarm, we will be having a zero-trust setup where containers that do not need to communicate do not communicate
+# We use default overlay networks to segment parts of our application here!
+
+services:  
+  frontend:
+    image: 339712792686.dkr.ecr.us-east-1.amazonaws.com/mangrove/frontend:latest
+    ports:
+      - 8081:80
+    environment:
+      - WEBSERVER_ADDRESS=webserver:8082
+    depends_on:
+      - webserver
+    networks:
+      - webserver-frontend
+  
+  # Make sure you have a .env file with env variables set for AWS secret credentials
+  webserver:
+    image: 339712792686.dkr.ecr.us-east-1.amazonaws.com/mangrove/webserver:latest
+    ports:
+      - 8082:80
+    depends_on:
+      - db
+      - ip-service
+    environment:
+      - PORT=80
+      - MONGO_CONNECTION_STRING=mongodb://mongo-db:27017/mmict-test
+      - FRONTEND_ADDRESS=frontend:8081
+      - IP_ADDRESS=ip-service:5002 # ultilize Docker DNS resolution to resolve address of IP_service
+      - AWS_REGION=${AWS_REGION}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    
+    networks:
+      - webserver-frontend
+      - webserver-image
+      - webserver-mongo
+  
+  mongo-db:
+    image: 339712792686.dkr.ecr.us-east-1.amazonaws.com/mangrove/mongo:latest
+    ports:
+      - 27017:27017
+    volumes:
+      - mongo-db:/data/db # named volume - name:path
+    networks:
+      - webserver-mongo
+
+  ip-service:
+    image: 339712792686.dkr.ecr.us-east-1.amazonaws.com/mangrove/ip:latest
+    ports:
+     - 5002:5002
+    environment:
+      - PORT=5002
+      - HOST_IP=0.0.0.0
+      - WEBSERVER_ADDRESS=webserver:8082
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    networks:
+     - webserver-image
+
+networks:
+  webserver-image:
+    driver: overlay
+  webserver-mongo:
+    driver: overlay
+  webserver-frontend:
+    driver: overlay
+
+# need to do this for named volumes since can be used across multiple services
+volumes:
+  mongo-db: 
