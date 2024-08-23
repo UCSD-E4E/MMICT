@@ -2,7 +2,7 @@
 # This is the dev compose file for dev and testing purposes, all containers run on a single Docker host on the default bridge network. 
 # IP addresses and port numbers are hardcoded here for local dev purposes
 
-services:  
+services:
   # define env in seperate .env file in container
   frontend:
     build: ./frontend
@@ -15,6 +15,7 @@ services:
       - PORT=80
       - WEBSERVER_ADDRESS=webserver:80
       - REACT_APP_NGINX_ADDRESS=localhost:8081
+      - REACT_APP_GOOGLE_CLIENT_ID=${REACT_APP_GOOGLE_CLIENT_ID}
       
   # Make sure you have a .env file with env variables set for AWS secret credentials
   webserver:
@@ -24,14 +25,17 @@ services:
       - db
       - ip-service
     environment:
-      - PORT=80
-      - MONGO_CONNECTION_STRING=mongodb://mongo_db:27017/mmict-test
+      - PORT=3001
+      - MONGO_CONNECTION_STRING=${MONGO_CONNECTION_STRING}      
       - FRONTEND_ADDRESS=frontend:80
       - IP_ADDRESS=image_processing_service:5002 # ultilize Docker DNS resolution to resolve address of IP_service
       - AWS_REGION=${AWS_REGION}
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - GOOGLE_AUTH_CLIENT_ID=${REACT_APP_GOOGLE_CLIENT_ID}
+      - GOOGLE_AUTH_CLIENT_SECRET=${REACT_APP_GOOGLE_CLIENT_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
   
   db:
     image: mongo
