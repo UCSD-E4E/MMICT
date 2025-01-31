@@ -1,6 +1,6 @@
 # Provider block to define the AWS provider and configure the credentials and region
 provider "aws" {
-  region = var.region
+  region     = var.region
   access_key = var.aws_access_key
   secret_key = var.aws_secret_key
 }
@@ -25,8 +25,8 @@ resource "aws_ecr_repository" "mmict-ecr-repo" {
     prevent_destroy = true
   }
 
-  image_encryption_configuration {
-    encryption_type = "AES256"
+  encryption_configuration {
+    encryption_type = "AES256"  # Correct block for encryption configuration
   }
 }
 
@@ -34,10 +34,10 @@ resource "aws_ecr_repository" "mmict-ecr-repo" {
 resource "aws_ecr_lifecycle_policy" "my_lifecycle_policy" {
   repository = aws_ecr_repository.mmict-ecr-repo.name
 
-  lifecycle_policy {
+  policy {
     rule {
       rule_priority = var.rule_priority
-      description   = "Expire images older than 30 days"
+      description   = "Expire images older than 30 days if not tagged"
       status        = "Enabled"
       action {
         type = "expire"
@@ -52,8 +52,26 @@ resource "aws_ecr_lifecycle_policy" "my_lifecycle_policy" {
         days = 30
       }
     }
+    rule {
+      rule_priority = 1
+      description   = "Do not expire the latest tagged images"
+      status        = "Enabled"
+      action {
+        type = "expire"
+      }
+      filter {
+        tag_status = "tagged"
+        tag {
+          value = "latest"
+        }
+      }
+      image_expiry {
+        days = 0  # Never expire the latest tag
+      }
+    }
   }
 }
+
 
 # Resource block to define an IAM policy that allows pushing and pulling images from the ECR repository
 resource "aws_iam_policy" "ecr_policy" {

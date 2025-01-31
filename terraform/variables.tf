@@ -1,3 +1,9 @@
+variable "project_name" {
+  description = "The name of the project"
+  type        = string
+  default     = "mmict-aws-deployment"
+}
+
 variable "aws_access_key" {
   description = "AWS Access Key"
   type        = string
