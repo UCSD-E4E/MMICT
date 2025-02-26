@@ -14,23 +14,26 @@ module "networking" {
   public_subnet_cidrs = var.public_subnet_cidrs
 }
 
+# Define in secrets.tfvars file
+variable "key_name" {}
+variable "public_key_path" {}
 
+# Authentication during testing
+resource "aws_key_pair" "my_key" {
+  key_name = var.key_name
+  #my public version of ssh key
+  public_key = file(var.public_key_path)
+}
 
 
 
 
 resource "aws_instance" "app_server" {
   #This instance is x86. Use command "uname -m" to check
-  ami           = "ami-08d70e59c07c61a3a"
+  ami           = var.ecs_ami_id
   instance_type = "t2.micro"
 
-  #iam_instance_profile = #aws_iam_instance_profile.ecs_instance_profile.name
-  /* add this in ecs outputs
-  output "ecs_instance_profile_name" {
-    description = "Name of the ECS instance profile"
-    value       = aws_iam_instance_profile.ecs_instance_profile.name
-  }
-  */
+  iam_instance_profile = aws_iam_instance_profile.ecs_instance_profile.name
 
   key_name = aws_key_pair.my_key.key_name
 
@@ -38,21 +41,17 @@ resource "aws_instance" "app_server" {
   user_data = <<-EOF
     #!/bin/bash
 
-    #user_data scripts run as root by default
-    cd /home/ubuntu
+    sleep 20
+    
+    echo "ECS_CLUSTER=${var.project_name}-cluster" | sudo tee /etc/ecs/ecs.config
 
-    #install docker
-    #sudo apt update -y
-
-    #sudo apt install -y docker.io
-    #sudo systemctl start docker
-    #sudo systemctl enable docker
-    #sudo usermod -aG docker ubuntu
-
-
-
-    # git clone dummy repo
-    git clone https://github.com/TWintersww/dummy-repo.git
+    #force docker to restart ecs-agent
+    sudo docker run --name ecs-agent --detach --restart=on-failure \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -v /var/log/ecs:/log \
+      -v /var/lib/ecs/data:/data \
+      -e ECS_CLUSTER=${var.project_name}-cluster \
+      amazon/amazon-ecs-agent:latest
   EOF
 
   #attach each both ENIs to instance
@@ -71,17 +70,6 @@ resource "aws_instance" "app_server" {
     Name = "MyEC2Instance"
   }
 }
-
-resource "aws_key_pair" "my_key" {
-  key_name = "aws_first_key"
-  #my public version of aws_first ssh key
-  public_key = file("~/.ssh/aws_first.pub")
-}
-
-
-
-
-
 
 
 
@@ -127,96 +115,163 @@ resource "aws_iam_instance_profile" "ecs_instance_profile" {
 }
 
 
-# Launch Template
-resource "aws_launch_template" "ecs_instance" {
-  name_prefix   = "${var.project_name}-ecs-instance"
-  image_id      = var.ecs_ami_id # Amazon ECS-Optimized AMI ID
-  instance_type = var.instance_type
 
-  network_interfaces {
-    associate_public_ip_address = true
-    #security_groups            = [aws_security_group.ecs_instance.id]
-    security_groups            = [module.networking.public_sg_id]
+# Fetch account ID dynamically
+data "aws_caller_identity" "current" {
+}
+
+resource "aws_ecr_repository" "mmict-ecr-repo" {
+  name                 = "${var.project_name}-ecr"
+  image_tag_mutability = "MUTABLE"
+  image_scanning_configuration {
+    scan_on_push = true
   }
 
-  iam_instance_profile {
-    name = aws_iam_instance_profile.ecs_instance_profile.name
+  tags = {
+    "Name"        = "${var.project_name}-ecr"
+    "Environment" = "production"
   }
 
-  user_data = base64encode(<<-EOF
-              #!/bin/bash
-              echo "ECS_CLUSTER=${aws_ecs_cluster.main.name}" >> /etc/ecs/ecs.config
-              EOF
-  )
+  lifecycle {
+    prevent_destroy = true
+  }
 
-  tag_specifications {
-    resource_type = "instance"
-    tags = {
-      Name = "${var.project_name}-ecs-instance"
+  encryption_configuration {
+    encryption_type = "AES256" # Correct block for encryption configuration
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "my_lifecycle_policy" {
+  repository = aws_ecr_repository.mmict-ecr-repo.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Expire images older than 30 days if not tagged"
+        action = {
+          type = "expire"
+        }
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 30
+        }
+      },
+      {
+        rulePriority = 2
+        description   = "Do not expire the latest tagged images"
+        action = {
+          type = "expire"
+        }
+        selection = {
+          tagStatus     = "tagged"
+          tagPrefixList = ["latest"]
+          countType     = "imageCountMoreThan"
+          countNumber   = 1
+        }
+      }
+    ]
+  })
+}
+
+# IAM policy defined for specific user/role/group
+resource "aws_iam_policy" "ecr_policy" {
+  name        = "ecr_push_pull_policy"
+  description = "Policy for pushing and pulling from ECR"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:PutImage",
+          "ecr:GetAuthorizationToken",
+          "ecr:GetDownloadUrlForLayer",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+# IAM role for ECS tasks
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "${var.project_name}-ecs-task-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = aws_iam_policy.ecr_policy.arn
+}
+
+resource "aws_cloudwatch_log_group" "ecs_my_service" {
+  name = "/ecs/my-service"
+  retention_in_days = 7
+}
+
+# Defines task blueprint. Specifies ECR repo and resources
+resource "aws_ecs_task_definition" "main" {
+  family             = "${var.project_name}-task"
+  execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn      = aws_iam_role.ecs_task_execution_role.arn
+
+  container_definitions = jsonencode([{
+    name      = "my-container"
+    image     = "${aws_ecr_repository.mmict-ecr-repo.repository_url}:latest"
+    cpu       = 256
+    memory    = 512
+    essential = true
+
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = "/ecs/my-service"
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "ecs"
+      }
     }
-  }
+  }])
 }
 
-# Auto Scaling Group
-resource "aws_autoscaling_group" "ecs_instances" {
-  name                = "${var.project_name}-ecs-asg"
-  #vpc_zone_identifier = aws_subnet.public[*].id
-  vpc_zone_identifier = module.vpc.public_subnet_ids
-  target_group_arns   = []
-  health_check_type   = "EC2"
-  desired_capacity    = var.desired_capacity
-  max_size            = var.max_size
-  min_size            = var.min_size
+# Actually runs ECS tasks. Set desired_count=0 to stop tasks
+resource "aws_ecs_service" "my_service" {
+  name = "${var.project_name}-service"
+  cluster = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.main.arn
+  desired_count = 0
+  launch_type = "EC2"
 
-  launch_template {
-    id      = aws_launch_template.ecs_instance.id
-    version = "$Latest"
-  }
+  deployment_minimum_healthy_percent = 50
+  deployment_maximum_percent = 200
 
-  tag {
-    key                 = "Name"
-    value               = "${var.project_name}-ecs-instance"
-    propagate_at_launch = true
-  }
+  # Relaunches task after any terraform apply
+  force_new_deployment = true
 }
-
-# Capacity Provider
-resource "aws_ecs_capacity_provider" "main" {
-  name = "${var.project_name}-capacity-provider"
-
-  auto_scaling_group_provider {
-    auto_scaling_group_arn         = aws_autoscaling_group.ecs_instances.arn
-    managed_termination_protection = "DISABLED"
-
-    managed_scaling {
-      maximum_scaling_step_size = 1000
-      minimum_scaling_step_size = 1
-      status                   = "ENABLED"
-      target_capacity          = 100
-    }
-  }
-}
-
-resource "aws_ecs_cluster_capacity_providers" "main" {
-  cluster_name = aws_ecs_cluster.main.name
-
-  capacity_providers = [aws_ecs_capacity_provider.main.name]
-
-  default_capacity_provider_strategy {
-    base              = 1
-    weight            = 100
-    capacity_provider = aws_ecs_capacity_provider.main.name
-  }
-}
-
-
-
 
 
 
 
 resource "aws_s3_bucket" "b" {
-  bucket = "tf-bucket-vivian-test-846248"
+  bucket = "tf-bucket-mangrove-test-12345"
 }
 
 resource "aws_s3_bucket_ownership_controls" "b" {

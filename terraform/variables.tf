@@ -21,19 +21,15 @@ variable "public_subnet_cidrs" {
 }
 
 variable "private_subnet_cidr" {
-  description = "CIDR block for private subnets"
+  description = "CIDR block for private subnet"
   type        = string
   default     = "10.0.3.0/24"
 }
 
-
-
-
-
 variable "ecs_ami_id" {
   description = "AMI ID for ECS instances"
   type        = string
-  default     = "amzn2-ami-ecs-kernel-5.10-hvm-2.0.20250117-x86_64-ebs"
+  default     = "ami-0cc2da8fab02dc93b"
   # You'll need to specify the ECS-optimized AMI ID for your region
   # Find it here: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-optimized_AMI.html
 }
