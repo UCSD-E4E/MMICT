@@ -14,7 +14,7 @@ if [ -z "$RESOURCES_TO_DESTROY" ]; then
 fi
 
 #construct destroy command
-DESTROY_CMD="terraform destroy"
+DESTROY_CMD="terraform destroy -var-file=secrets.tfvars"
 for RESOURCE in $RESOURCES_TO_DESTROY; do
   DESTROY_CMD+=" -target=$RESOURCE"
 done
