@@ -9,10 +9,18 @@ resource "aws_vpc" "my_vpc" {
   }
 }
 
-resource "aws_vpc_endpoint" "s3" {
-  vpc_id       = aws_vpc.my_vpc.id
-  service_name = "com.amazonaws.us-west-2.s3"
-  route_table_ids = [aws_vpc.my_vpc.default_route_table_id]
+# Provides routing to all s3 buckets in region
+# Only meant for connectivity, define ACL/IAM permissions separately
+resource "aws_vpc_endpoint" "s3_endpoint" {
+  vpc_id = aws_vpc.my_vpc.id
+  service_name = "com.amazonaws.${var.aws_region}.s3"
+  vpc_endpoint_type = "Gateway"
+
+  # Associate this endpoint with private route table
+  route_table_ids = [var.private_route_table_id]
+  tags = {
+    Name = "${var.project_name}-s3-endpoint"
+  }
 }
 
 data "aws_availability_zones" "available" {}

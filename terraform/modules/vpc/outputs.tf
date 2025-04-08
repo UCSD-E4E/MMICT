@@ -12,3 +12,8 @@ output "private_subnet_id" {
   description = "Private subnet ID"
   value = aws_subnet.private_subnet.id
 }
+
+output "s3_endpoint_id" {
+  description = "S3 bucket endpoint id"
+  value = aws_vpc_endpoint.s3_endpoint.id
+}

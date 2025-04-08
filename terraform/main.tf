@@ -1,9 +1,22 @@
+terraform {
+  backend "s3" {
+    bucket         = "evan-tf-state-storage"
+    key            = "state/terraform.tfstate"
+    region         = "us-west-2"
+    encrypt        = true
+    dynamodb_table = "terraform-lock-table"  # optional for state locking
+    profile = "e8wu"
+  }
+}
+
 module "vpc" {
   source              = "./modules/vpc"
   project_name        = var.project_name
+  aws_region = var.aws_region
   vpc_cidr            = var.vpc_cidr
   public_subnet_cidrs = var.public_subnet_cidrs
   private_subnet_cidr = var.private_subnet_cidr
+  private_route_table_id = module.networking.private_route_table_id
 }
 
 module "networking" {
@@ -167,7 +180,7 @@ resource "aws_ecr_lifecycle_policy" "my_lifecycle_policy" {
         }
         selection = {
           tagStatus     = "tagged"
-          tagPrefixList = ["latest"]
+          tagPrefixList = ["latest", "frontend", "webserver"]
           countType     = "imageCountMoreThan"
           countNumber   = 1
         }
@@ -234,22 +247,40 @@ resource "aws_ecs_task_definition" "main" {
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn      = aws_iam_role.ecs_task_execution_role.arn
 
-  container_definitions = jsonencode([{
-    name      = "my-container"
-    image     = "${aws_ecr_repository.mmict-ecr-repo.repository_url}:latest"
-    cpu       = 256
-    memory    = 512
-    essential = true
+  container_definitions = jsonencode([
+    {
+      name      = "frontend-container"
+      image     = "${aws_ecr_repository.mmict-ecr-repo.repository_url}:frontend"
+      cpu       = 256
+      memory    = 512
+      essential = true
 
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        "awslogs-group"         = "/ecs/my-service"
-        "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "ecs"
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = "/ecs/my-service"
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs-frontend"
+        }
+      }
+    },
+    {
+      name      = "webserver-container"
+      image     = "${aws_ecr_repository.mmict-ecr-repo.repository_url}:webserver"
+      cpu       = 256
+      memory    = 512
+      essential = true
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = "/ecs/my-service"
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs-webserver"
+        }
       }
     }
-  }])
+  ])
 }
 
 # Actually runs ECS tasks. Set desired_count=0 to stop tasks
@@ -274,23 +305,50 @@ resource "aws_s3_bucket" "b" {
   bucket = "tf-bucket-mangrove-test-12345"
 }
 
-resource "aws_s3_bucket_ownership_controls" "b" {
+# All objects in bucket owned by bucket owner
+resource "aws_s3_bucket_ownership_controls" "b_controls" {
   bucket = aws_s3_bucket.b.id
   rule {
     object_ownership = "BucketOwnerPreferred"
   }
 }
 
-resource "aws_s3_bucket_acl" "b" {
-  depends_on = [aws_s3_bucket_ownership_controls.b]
+# Only bucket owner and entities granted permission can access bucket
+resource "aws_s3_bucket_acl" "b_acl" {
+  depends_on = [aws_s3_bucket_ownership_controls.b_controls]
 
   bucket = aws_s3_bucket.b.id
   acl    = "private"
 }
 
-resource "aws_s3_bucket_versioning" "b" {
+resource "aws_s3_bucket_policy" "b_policy" {
+  bucket = aws_s3_bucket.b.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid       = "AllowAccessFromVPC",
+        Effect    = "Allow",
+        Principal = "*",
+        Action    = "s3:*",
+        Resource  = [
+          "arn:aws:s3:::tf-bucket-mangrove-test-12345",
+          "arn:aws:s3:::tf-bucket-mangrove-test-12345/*"
+        ],
+        Condition = {
+          StringEquals = {
+            "aws:SourceVpce" = "${module.vpc.s3_endpoint_id}"  # VPC Endpoint ID
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_s3_bucket_versioning" "b_versioning" {
   bucket = aws_s3_bucket.b.id
   versioning_configuration {
     status = "Enabled"
   }
 }
+

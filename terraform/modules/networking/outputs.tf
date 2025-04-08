@@ -9,3 +9,7 @@ output "private_eni_id" {
 output "public_sg_id" {
   value = aws_security_group.public_sg.id
 }
+
+output "private_route_table_id" {
+  value = aws_route_table.private_route_table.id
+}
