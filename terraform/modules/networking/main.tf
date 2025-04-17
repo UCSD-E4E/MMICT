@@ -49,11 +49,11 @@ resource "aws_security_group" "private_sg" {
   name        = "private-sg"
   vpc_id      = var.vpc_id
 
-  # Incoming traffic on port 5002 allowed only from resources associated with public_sg
-  # 5002 is port of ip-service
+  # Incoming traffic on port 3000 allowed only from resources associated with public_sg
+  # 3000 defined as WS port
   ingress {
-    from_port   = 5002
-    to_port     = 5002
+    from_port   = 3000
+    to_port     = 3000
     protocol    = "tcp"
     security_groups = [aws_security_group.public_sg.id] # Allow traffic from public ENI
   }

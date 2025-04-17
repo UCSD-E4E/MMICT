@@ -29,7 +29,8 @@ variable "private_subnet_cidr" {
 variable "ecs_ami_id" {
   description = "AMI ID for ECS instances"
   type        = string
-  default     = "ami-0cc2da8fab02dc93b"
+  # default     = "ami-0cc2da8fab02dc93b" # amd
+  default = "ami-087b1a6b868e56bdc" # arm
   # You'll need to specify the ECS-optimized AMI ID for your region
   # Find it here: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-optimized_AMI.html
 }

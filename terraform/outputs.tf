@@ -3,6 +3,6 @@ output "vpc_id" {
   value       = module.vpc.vpc_id
 }
 
-output "ecr_repository_url" {
-  value = aws_ecr_repository.mmict-ecr-repo.repository_url
+output "eip_address" {
+  value = module.networking.my_eip_addresses[0]
 }

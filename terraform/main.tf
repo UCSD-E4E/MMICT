@@ -30,6 +30,7 @@ module "networking" {
 # Define in secrets.tfvars file
 variable "key_name" {}
 variable "public_key_path" {}
+variable "service_image_urls" {}
 
 # Authentication during testing
 resource "aws_key_pair" "my_key" {
@@ -42,9 +43,8 @@ resource "aws_key_pair" "my_key" {
 
 
 resource "aws_instance" "app_server" {
-  #This instance is x86. Use command "uname -m" to check
   ami           = var.ecs_ami_id
-  instance_type = "t2.micro"
+  instance_type = "t4g.micro"
 
   iam_instance_profile = aws_iam_instance_profile.ecs_instance_profile.name
 
@@ -133,15 +133,43 @@ resource "aws_iam_instance_profile" "ecs_instance_profile" {
 data "aws_caller_identity" "current" {
 }
 
-resource "aws_ecr_repository" "mmict-ecr-repo" {
-  name                 = "${var.project_name}-ecr"
+locals {
+  ec2_private_ip = aws_instance.app_server.private_ip
+  eip_address = module.networking.my_eip_addresses[0]
+
+  services = {
+    frontend = {
+      port = 80
+      essential = true
+      env = [
+        { name = "PORT", value = "80" },
+        { name = "WEBSERVER_ADDRESS", value = "${local.ec2_private_ip}:3000"},
+        #{ name = "REACT_APP_NGINX_ADDRESS", value = "${local.ec2_private_ip}:3000"}
+        { name = "REACT_APP_NGINX_ADDRESS", value = "${local.eip_address}"}
+      ]
+    }
+    webserver = {
+      port = 3000
+      essential = true
+      env = [
+        { name = "PORT", value = "3000" },
+        { name = "FRONTEND_ADDRESS", value = "${local.ec2_private_ip}:80"}
+      ]
+    }
+  }
+}
+/*
+resource "aws_ecr_repository" "ecr_repo" {
+  for_each = local.services
+  name                 = "${each.key}-ecr"
   image_tag_mutability = "MUTABLE"
+
   image_scanning_configuration {
     scan_on_push = true
   }
 
   tags = {
-    "Name"        = "${var.project_name}-ecr"
+    "Name"        = "${each.key}-ecr"
     "Environment" = "production"
   }
 
@@ -154,8 +182,9 @@ resource "aws_ecr_repository" "mmict-ecr-repo" {
   }
 }
 
-resource "aws_ecr_lifecycle_policy" "my_lifecycle_policy" {
-  repository = aws_ecr_repository.mmict-ecr-repo.name
+resource "aws_ecr_lifecycle_policy" "ecr_lifecycle_policy" {
+  for_each = aws_ecr_repository.ecr_repo
+  repository = each.value.name
 
   policy = jsonencode({
     rules = [
@@ -180,7 +209,7 @@ resource "aws_ecr_lifecycle_policy" "my_lifecycle_policy" {
         }
         selection = {
           tagStatus     = "tagged"
-          tagPrefixList = ["latest", "frontend", "webserver"]
+          tagPrefixList = ["latest"]
           countType     = "imageCountMoreThan"
           countNumber   = 1
         }
@@ -188,7 +217,7 @@ resource "aws_ecr_lifecycle_policy" "my_lifecycle_policy" {
     ]
   })
 }
-
+*/
 # IAM policy defined for specific user/role/group
 resource "aws_iam_policy" "ecr_policy" {
   name        = "ecr_push_pull_policy"
@@ -237,7 +266,9 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
 }
 
 resource "aws_cloudwatch_log_group" "ecs_my_service" {
-  name = "/ecs/my-service"
+  for_each = local.services
+
+  name = "/ecs/${var.project_name}-${each.key}"
   retention_in_days = 7
 }
 
@@ -248,35 +279,29 @@ resource "aws_ecs_task_definition" "main" {
   task_role_arn      = aws_iam_role.ecs_task_execution_role.arn
 
   container_definitions = jsonencode([
-    {
-      name      = "frontend-container"
-      image     = "${aws_ecr_repository.mmict-ecr-repo.repository_url}:frontend"
+    for svc, cfg in local.services : {
+      name      = "${svc}-container"
+      #image     = "${aws_ecr_repository.ecr_repo[svc].repository_url}:latest"
+      image     = var.service_image_urls[svc]
       cpu       = 256
-      memory    = 512
-      essential = true
+      memory    = 256
+      essential = cfg.essential
 
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = "/ecs/my-service"
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs-frontend"
+      environment = cfg.env
+
+      portMappings = [
+        {
+          containerPort = cfg.port
+          hostPort = cfg.port
         }
-      }
-    },
-    {
-      name      = "webserver-container"
-      image     = "${aws_ecr_repository.mmict-ecr-repo.repository_url}:webserver"
-      cpu       = 256
-      memory    = 512
-      essential = true
+      ]
 
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = "/ecs/my-service"
+          "awslogs-group"         = "/ecs/${var.project_name}-${svc}"
           "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs-webserver"
+          "awslogs-stream-prefix" = "ecs-${svc}"
         }
       }
     }
@@ -288,7 +313,7 @@ resource "aws_ecs_service" "my_service" {
   name = "${var.project_name}-service"
   cluster = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.main.arn
-  desired_count = 0
+  desired_count = 1
   launch_type = "EC2"
 
   deployment_minimum_healthy_percent = 50

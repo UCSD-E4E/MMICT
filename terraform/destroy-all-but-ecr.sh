@@ -1,11 +1,14 @@
 #!/bin/bash
+set -euo pipefail
 
 #define resource to exclude
-EXCLUDE_RESOURCE="aws_ecr_repository.mmict-ecr-repo"
+EXCLUDE_PATTERN="^aws_ecr_repository\.ecr_repo\["
+#exclude ecr repo + ecr lifecycle policy
+#EXCLUDE_PATTERN="^aws_ecr_repository\.ecr_repo\[|^aws_ecr_lifecycle_policy\.ecr_lifecycle_policy\["
 
 ALL_RESOURCES=$(terraform state list)
 
-RESOURCES_TO_DESTROY=$(echo "$ALL_RESOURCES" | grep -v "$EXCLUDE_RESOURCE")
+RESOURCES_TO_DESTROY=$(grep -Ev "${EXCLUDE_PATTERN}" <<<"$ALL_RESOURCES")
 
 #error checking
 if [ -z "$RESOURCES_TO_DESTROY" ]; then
@@ -14,17 +17,18 @@ if [ -z "$RESOURCES_TO_DESTROY" ]; then
 fi
 
 #construct destroy command
-DESTROY_CMD="terraform destroy -var-file=secrets.tfvars"
-for RESOURCE in $RESOURCES_TO_DESTROY; do
-  DESTROY_CMD+=" -target=$RESOURCE"
-done
+DESTROY_CMD=(terraform destroy -var-file=secrets.tfvars)
+while read -r RESOURCE; do
+  DESTROY_CMD+=( -target="$RESOURCE" )
+done <<<"$RESOURCES_TO_DESTROY"
 
 #print and confirm command
-echo "Executing: $DESTROY_CMD"
+echo "About to run:"
+printf "  %s\n" "${DESTROY_CMD[@]}"
 read -p "Proceed with destruction? (yes/no): " CONFIRM
 
 if [[ "$CONFIRM" == "yes" ]]; then
-  eval "$DESTROY_CMD"
+  "${DESTROY_CMD[@]}"
 else
   echo "Destruction cancelled."
 fi
