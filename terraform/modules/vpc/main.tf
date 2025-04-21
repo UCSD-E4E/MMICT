@@ -39,11 +39,12 @@ resource "aws_subnet" "public_subnets" {
   }
 }
 
-resource "aws_subnet" "private_subnet" {
+resource "aws_subnet" "private_subnets" {
+  count = length(var.private_subnet_cidrs)
   vpc_id = aws_vpc.my_vpc.id
-  cidr_block = var.private_subnet_cidr
-  availability_zone = aws_subnet.public_subnets[0].availability_zone
+  cidr_block = var.private_subnet_cidrs[count.index] 
+  availability_zone = data.aws_availability_zones.available.names[count.index]
   tags = {
-    Name = "${var.project_name}-private-1"
+    Name = "${var.project_name}-private-${count.index + 1}"
   }
 }

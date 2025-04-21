@@ -15,7 +15,7 @@ module "vpc" {
   aws_region = var.aws_region
   vpc_cidr            = var.vpc_cidr
   public_subnet_cidrs = var.public_subnet_cidrs
-  private_subnet_cidr = var.private_subnet_cidr
+  private_subnet_cidrs = var.private_subnet_cidrs
   private_route_table_id = module.networking.private_route_table_id
 }
 
@@ -23,8 +23,9 @@ module "networking" {
   source              = "./modules/networking"
   vpc_id              = module.vpc.vpc_id
   public_subnet_ids   = module.vpc.public_subnet_ids
-  private_subnet_id   = module.vpc.private_subnet_id
+  private_subnet_ids   = module.vpc.private_subnet_ids
   public_subnet_cidrs = var.public_subnet_cidrs
+  private_subnet_cidrs = var.private_subnet_cidrs
 }
 
 # Define in secrets.tfvars file
@@ -158,6 +159,7 @@ data "aws_network_interface" "ws_details" {
 }
 
 locals {
+  ws_alb_dns = aws_lb.webserver_alb.dns_name
   ec2_private_ip = aws_instance.app_server.private_ip
   eip_address = module.networking.my_eip_addresses[0]
 
@@ -172,7 +174,7 @@ locals {
       essential = true
       env = [
         { name = "PORT", value = "80" },
-        { name = "WEBSERVER_ADDRESS", value = "${local.ws_eni_priv_ip}:3000"},
+        { name = "WEBSERVER_ADDRESS", value = "${local.ws_alb_dns}:3000"},
         { name = "REACT_APP_NGINX_ADDRESS", value = "${local.eip_address}"}
       ]
     }
@@ -354,7 +356,7 @@ resource "aws_ecs_service" "webserver-service" {
   launch_type = "EC2"
 
   network_configuration {
-    subnets = [module.vpc.private_subnet_id]
+    subnets = [module.vpc.private_subnet_ids[0]]
     security_groups = [module.networking.private_sg_id]
   }
 
@@ -366,12 +368,62 @@ resource "aws_ecs_service" "webserver-service" {
   }
   */
 
+  load_balancer {
+    target_group_arn = aws_lb_target_group.webserver_tg.arn
+    container_name = "webserver-container"
+    container_port = 3000
+  }
+
+  # allow container to boot up/bind to ip port before ALB health checks
+  health_check_grace_period_seconds = 60
+
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent = 200
   # Relaunches task after any terraform apply
   force_new_deployment = true
 }
 
+
+
+resource "aws_lb" "webserver_alb" {
+  name = "webserver-alb"
+  internal = true
+  load_balancer_type = "application"
+  subnets = module.vpc.private_subnet_ids
+  security_groups = [module.networking.private_sg_id]
+
+  enable_deletion_protection = false
+}
+
+resource "aws_lb_target_group" "webserver_tg" {
+  name = "webserver-tg"
+  port = 3000
+  protocol = "HTTP"
+  vpc_id = module.vpc.vpc_id
+
+  target_type = "ip"
+
+  health_check {
+    path = "/"
+    port = "3000"
+    protocol = "HTTP"
+    healthy_threshold = 2
+    unhealthy_threshold = 3
+    interval = 15
+    timeout = 5
+  }
+}
+
+resource "aws_lb_listener" "webserver_listener" {
+  load_balancer_arn = aws_lb.webserver_alb.arn
+  port = 3000
+  protocol = "HTTP"
+
+  default_action {
+    type = "forward"
+    target_group_arn = aws_lb_target_group.webserver_tg.arn
+  }
+}
 
 
 

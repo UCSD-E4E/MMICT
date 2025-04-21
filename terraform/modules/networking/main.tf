@@ -6,8 +6,9 @@ resource "aws_network_interface" "public_eni" {
 }
 
 resource "aws_network_interface" "private_eni" {
-  subnet_id = var.private_subnet_id
-  description = "Private ENI for Webserver"
+  count = length(var.private_subnet_cidrs)
+  subnet_id = var.private_subnet_ids[count.index]
+  description = "Private ENI for Webserver ${count.index + 1}"
   security_groups = [aws_security_group.private_sg.id]
 }
 
@@ -58,6 +59,14 @@ resource "aws_security_group" "private_sg" {
     security_groups = [aws_security_group.public_sg.id] # Allow traffic from public ENI
   }
 
+  # Allow port 3000 from itself (for ALB health check ping to WS task)
+  ingress {
+    from_port = 3000
+    to_port = 3000
+    protocol = "tcp"
+    self = true
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -99,7 +108,8 @@ resource "aws_route_table" "private_route_table" {
 }
 
 resource "aws_route_table_association" "private_subnet_association" {
-  subnet_id = var.private_subnet_id
+  count = length(var.private_subnet_cidrs)
+  subnet_id = var.private_subnet_ids[count.index]
   route_table_id = aws_route_table.private_route_table.id
 }
 

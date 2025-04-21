@@ -8,9 +8,9 @@ output "public_subnet_ids" {
   value = aws_subnet.public_subnets[*].id
 }
 
-output "private_subnet_id" {
-  description = "Private subnet ID"
-  value = aws_subnet.private_subnet.id
+output "private_subnet_ids" {
+  description = "List of private subnet IDs"
+  value = aws_subnet.private_subnets[*].id
 }
 
 output "s3_endpoint_id" {
