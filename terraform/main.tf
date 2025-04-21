@@ -73,10 +73,12 @@ resource "aws_instance" "app_server" {
     network_interface_id = module.networking.public_eni_ids[0]
     device_index         = 0
   }
+  /*
   network_interface {
     network_interface_id = module.networking.private_eni_id
     device_index         = 1
   }
+  */
 
 
   tags = {
@@ -132,10 +134,37 @@ resource "aws_iam_instance_profile" "ecs_instance_profile" {
 # Fetch account ID dynamically
 data "aws_caller_identity" "current" {
 }
+/*
+data "aws_network_interfaces" "frontend_container_eni" {
+  filter {
+    name   = "tag:App"
+    values = ["frontend"]
+  }
+}
+data "aws_network_interface" "fe_details" {
+  count = local.fe_eni_id != null ? 1 : 0
+  id    = local.fe_eni_id
+}
+*/
+data "aws_network_interfaces" "webserver_container_eni" {
+  filter {
+    name   = "tag:App"
+    values = ["webserver"]
+  }
+}
+data "aws_network_interface" "ws_details" {
+  count = local.ws_eni_id != null ? 1 : 0
+  id = local.ws_eni_id
+}
 
 locals {
   ec2_private_ip = aws_instance.app_server.private_ip
   eip_address = module.networking.my_eip_addresses[0]
+
+  #fe_eni_id = try(data.aws_network_interfaces.frontend_container_eni.ids[0], null)
+  #fe_eni_pub_ip = try(data.aws_network_interface.fe_details[0].association[0].public_ip, "0.0.0.0")
+  ws_eni_id = try(data.aws_network_interfaces.webserver_container_eni.ids[0], null)
+  ws_eni_priv_ip = local.ws_eni_id != null ? data.aws_network_interface.ws_details[0].private_ip : "0.0.0.0"
 
   services = {
     frontend = {
@@ -143,8 +172,7 @@ locals {
       essential = true
       env = [
         { name = "PORT", value = "80" },
-        { name = "WEBSERVER_ADDRESS", value = "${local.ec2_private_ip}:3000"},
-        #{ name = "REACT_APP_NGINX_ADDRESS", value = "${local.ec2_private_ip}:3000"}
+        { name = "WEBSERVER_ADDRESS", value = "${local.ws_eni_priv_ip}:3000"},
         { name = "REACT_APP_NGINX_ADDRESS", value = "${local.eip_address}"}
       ]
     }
@@ -153,71 +181,12 @@ locals {
       essential = true
       env = [
         { name = "PORT", value = "3000" },
-        { name = "FRONTEND_ADDRESS", value = "${local.ec2_private_ip}:80"}
+        { name = "FRONTEND_ADDRESS", value = "${local.eip_address}:80"}
       ]
     }
   }
 }
-/*
-resource "aws_ecr_repository" "ecr_repo" {
-  for_each = local.services
-  name                 = "${each.key}-ecr"
-  image_tag_mutability = "MUTABLE"
 
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = {
-    "Name"        = "${each.key}-ecr"
-    "Environment" = "production"
-  }
-
-  lifecycle {
-    prevent_destroy = true
-  }
-
-  encryption_configuration {
-    encryption_type = "AES256" # Correct block for encryption configuration
-  }
-}
-
-resource "aws_ecr_lifecycle_policy" "ecr_lifecycle_policy" {
-  for_each = aws_ecr_repository.ecr_repo
-  repository = each.value.name
-
-  policy = jsonencode({
-    rules = [
-      {
-        rulePriority = 1
-        description  = "Expire images older than 30 days if not tagged"
-        action = {
-          type = "expire"
-        }
-        selection = {
-          tagStatus   = "untagged"
-          countType   = "sinceImagePushed"
-          countUnit   = "days"
-          countNumber = 30
-        }
-      },
-      {
-        rulePriority = 2
-        description   = "Do not expire the latest tagged images"
-        action = {
-          type = "expire"
-        }
-        selection = {
-          tagStatus     = "tagged"
-          tagPrefixList = ["latest"]
-          countType     = "imageCountMoreThan"
-          countNumber   = 1
-        }
-      }
-    ]
-  })
-}
-*/
 # IAM policy defined for specific user/role/group
 resource "aws_iam_policy" "ecr_policy" {
   name        = "ecr_push_pull_policy"
@@ -273,52 +242,132 @@ resource "aws_cloudwatch_log_group" "ecs_my_service" {
 }
 
 # Defines task blueprint. Specifies ECR repo and resources
-resource "aws_ecs_task_definition" "main" {
-  family             = "${var.project_name}-task"
+resource "aws_ecs_task_definition" "mmict-frontend-task" {
+  family             = "mmict-frontend-task"
+  # network_mode = "awsvpc"
+  # requires_compatibilities = ["EC2"]
+  # cpu = "256"
+  # memory = "256"
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn      = aws_iam_role.ecs_task_execution_role.arn
 
   container_definitions = jsonencode([
-    for svc, cfg in local.services : {
-      name      = "${svc}-container"
-      #image     = "${aws_ecr_repository.ecr_repo[svc].repository_url}:latest"
-      image     = var.service_image_urls[svc]
+    {
+      name      = "frontend-container"
+      image     = var.service_image_urls["frontend"]
       cpu       = 256
       memory    = 256
-      essential = cfg.essential
+      essential = local.services["frontend"].essential
 
-      environment = cfg.env
+      environment = local.services["frontend"].env
 
       portMappings = [
         {
-          containerPort = cfg.port
-          hostPort = cfg.port
+          containerPort = local.services["frontend"].port
+          hostPort = local.services["frontend"].port
         }
       ]
 
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = "/ecs/${var.project_name}-${svc}"
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs-${svc}"
+          awslogs-group         = "/ecs/${var.project_name}-frontend"
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs-frontend"
         }
       }
     }
   ])
 }
 
+resource "aws_ecs_task_definition" "mmict-webserver-task" {
+  family             = "mmict-webserver-task"
+  network_mode = "awsvpc"
+  requires_compatibilities = ["EC2"]
+  cpu = "256"
+  memory = "256"
+  execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn      = aws_iam_role.ecs_task_execution_role.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "webserver-container"
+      image     = var.service_image_urls["webserver"]
+      cpu       = 256
+      memory    = 256
+      essential = local.services["webserver"].essential
+
+      environment = local.services["webserver"].env
+
+      portMappings = [
+        {
+          containerPort = local.services["webserver"].port
+          hostPort = local.services["webserver"].port
+        }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = "/ecs/${var.project_name}-webserver"
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs-webserver"
+        }
+      }
+    }
+  ])
+}
+
+
 # Actually runs ECS tasks. Set desired_count=0 to stop tasks
-resource "aws_ecs_service" "my_service" {
-  name = "${var.project_name}-service"
+resource "aws_ecs_service" "frontend-service" {
+  name = "${var.project_name}-frontend-service"
   cluster = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.main.arn
+  task_definition = aws_ecs_task_definition.mmict-frontend-task.arn
   desired_count = 1
   launch_type = "EC2"
+  /*
+  network_configuration {
+    subnets = [module.vpc.public_subnet_ids[0]]
+    security_groups = [module.networking.public_sg_id]
+  }
+  */
+  /*
+  propagate_tags = "SERVICE"
+  tags = {
+    "Name" = "frontend-task"
+    "App"  = "frontend"
+  }
+  */
 
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent = 200
+  # Relaunches task after any terraform apply
+  force_new_deployment = true
+}
 
+resource "aws_ecs_service" "webserver-service" {
+  name = "${var.project_name}-webserver-service"
+  cluster = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.mmict-webserver-task.arn
+  desired_count = 1
+  launch_type = "EC2"
+
+  network_configuration {
+    subnets = [module.vpc.private_subnet_id]
+    security_groups = [module.networking.private_sg_id]
+  }
+
+  /*
+  propagate_tags = "SERVICE"
+  tags = {
+    "Name" = "webserver-task"
+    "App"  = "webserver"
+  }
+  */
+
+  deployment_minimum_healthy_percent = 50
+  deployment_maximum_percent = 200
   # Relaunches task after any terraform apply
   force_new_deployment = true
 }
