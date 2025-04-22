@@ -1,16 +1,3 @@
-resource "aws_network_interface" "public_eni" {
-  count = length(var.public_subnet_cidrs)
-  subnet_id = var.public_subnet_ids[count.index]
-  description = "Public ENI for Frontend ${count.index + 1}"
-  security_groups = [aws_security_group.public_sg.id]
-}
-
-resource "aws_network_interface" "private_eni" {
-  count = length(var.private_subnet_cidrs)
-  subnet_id = var.private_subnet_ids[count.index]
-  description = "Private ENI for Webserver ${count.index + 1}"
-  security_groups = [aws_security_group.private_sg.id]
-}
 
 resource "aws_security_group" "public_sg" {
   name        = "public-sg"
@@ -23,12 +10,22 @@ resource "aws_security_group" "public_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Allow port 80 from itself (for ALB health check ping to FE task)
+  ingress {
+    from_port = 80
+    to_port = 80
+    protocol = "tcp"
+    self = true
+  }
+
+  /*
   ingress {
     from_port   = 32768 
     to_port     = 65535
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  */
 
   #FOR TESTING
   ingress {
@@ -38,6 +35,7 @@ resource "aws_security_group" "public_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Could potentially tighten to only port 3000 for tcp protocol if FE only comms with WS and no other apis
   egress {
     from_port   = 0
     to_port     = 0
@@ -114,15 +112,3 @@ resource "aws_route_table_association" "private_subnet_association" {
 }
 
 
-resource "aws_eip" "my_eip" {
-  count = length(aws_network_interface.public_eni)
-  tags = {
-    Name = "MyElasticIP-${count.index + 1}"
-  }
-}
-
-resource "aws_eip_association" "my_eip_assoc" {
-  count = length(aws_network_interface.public_eni)
-  allocation_id = aws_eip.my_eip[count.index].id
-  network_interface_id = aws_network_interface.public_eni[count.index].id
-}

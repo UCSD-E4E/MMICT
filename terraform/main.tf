@@ -45,7 +45,7 @@ resource "aws_key_pair" "my_key" {
 
 resource "aws_instance" "app_server" {
   ami           = var.ecs_ami_id
-  instance_type = "t4g.micro"
+  instance_type = "t4g.small"
 
   iam_instance_profile = aws_iam_instance_profile.ecs_instance_profile.name
 
@@ -68,18 +68,10 @@ resource "aws_instance" "app_server" {
       amazon/amazon-ecs-agent:latest
   EOF
 
-  #attach each both ENIs to instance
-  #b/c ENI already attached to subnet, instance's subnet_id is implicitly determined
-  network_interface {
-    network_interface_id = module.networking.public_eni_ids[0]
-    device_index         = 0
-  }
-  /*
-  network_interface {
-    network_interface_id = module.networking.private_eni_id
-    device_index         = 1
-  }
-  */
+  # specify subnet directly instead of attaching ENI
+  subnet_id = module.vpc.public_subnet_ids[0]
+  vpc_security_group_ids = [module.networking.public_sg_id]
+  associate_public_ip_address = true
 
 
   tags = {
@@ -135,38 +127,10 @@ resource "aws_iam_instance_profile" "ecs_instance_profile" {
 # Fetch account ID dynamically
 data "aws_caller_identity" "current" {
 }
-/*
-data "aws_network_interfaces" "frontend_container_eni" {
-  filter {
-    name   = "tag:App"
-    values = ["frontend"]
-  }
-}
-data "aws_network_interface" "fe_details" {
-  count = local.fe_eni_id != null ? 1 : 0
-  id    = local.fe_eni_id
-}
-*/
-data "aws_network_interfaces" "webserver_container_eni" {
-  filter {
-    name   = "tag:App"
-    values = ["webserver"]
-  }
-}
-data "aws_network_interface" "ws_details" {
-  count = local.ws_eni_id != null ? 1 : 0
-  id = local.ws_eni_id
-}
 
 locals {
+  fe_alb_dns = aws_lb.frontend_alb.dns_name
   ws_alb_dns = aws_lb.webserver_alb.dns_name
-  ec2_private_ip = aws_instance.app_server.private_ip
-  eip_address = module.networking.my_eip_addresses[0]
-
-  #fe_eni_id = try(data.aws_network_interfaces.frontend_container_eni.ids[0], null)
-  #fe_eni_pub_ip = try(data.aws_network_interface.fe_details[0].association[0].public_ip, "0.0.0.0")
-  ws_eni_id = try(data.aws_network_interfaces.webserver_container_eni.ids[0], null)
-  ws_eni_priv_ip = local.ws_eni_id != null ? data.aws_network_interface.ws_details[0].private_ip : "0.0.0.0"
 
   services = {
     frontend = {
@@ -175,7 +139,7 @@ locals {
       env = [
         { name = "PORT", value = "80" },
         { name = "WEBSERVER_ADDRESS", value = "${local.ws_alb_dns}:3000"},
-        { name = "REACT_APP_NGINX_ADDRESS", value = "${local.eip_address}"}
+        { name = "REACT_APP_NGINX_ADDRESS", value = "${local.fe_alb_dns}"}
       ]
     }
     webserver = {
@@ -183,7 +147,7 @@ locals {
       essential = true
       env = [
         { name = "PORT", value = "3000" },
-        { name = "FRONTEND_ADDRESS", value = "${local.eip_address}:80"}
+        { name = "FRONTEND_ADDRESS", value = "${local.fe_alb_dns}:80"}
       ]
     }
   }
@@ -246,10 +210,10 @@ resource "aws_cloudwatch_log_group" "ecs_my_service" {
 # Defines task blueprint. Specifies ECR repo and resources
 resource "aws_ecs_task_definition" "mmict-frontend-task" {
   family             = "mmict-frontend-task"
-  # network_mode = "awsvpc"
-  # requires_compatibilities = ["EC2"]
-  # cpu = "256"
-  # memory = "256"
+  network_mode = "awsvpc"
+  requires_compatibilities = ["EC2"]
+  cpu = "256"
+  memory = "256"
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn      = aws_iam_role.ecs_task_execution_role.arn
 
@@ -328,19 +292,19 @@ resource "aws_ecs_service" "frontend-service" {
   task_definition = aws_ecs_task_definition.mmict-frontend-task.arn
   desired_count = 1
   launch_type = "EC2"
-  /*
+  
   network_configuration {
     subnets = [module.vpc.public_subnet_ids[0]]
     security_groups = [module.networking.public_sg_id]
   }
-  */
-  /*
-  propagate_tags = "SERVICE"
-  tags = {
-    "Name" = "frontend-task"
-    "App"  = "frontend"
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.frontend_tg.arn
+    container_name = "frontend-container"
+    container_port = 80
   }
-  */
+
+  health_check_grace_period_seconds = 60
 
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent = 200
@@ -360,14 +324,6 @@ resource "aws_ecs_service" "webserver-service" {
     security_groups = [module.networking.private_sg_id]
   }
 
-  /*
-  propagate_tags = "SERVICE"
-  tags = {
-    "Name" = "webserver-task"
-    "App"  = "webserver"
-  }
-  */
-
   load_balancer {
     target_group_arn = aws_lb_target_group.webserver_tg.arn
     container_name = "webserver-container"
@@ -383,7 +339,15 @@ resource "aws_ecs_service" "webserver-service" {
   force_new_deployment = true
 }
 
+resource "aws_lb" "frontend_alb" {
+  name = "frontend-alb"
+  internal = false #public facing
+  load_balancer_type = "application"
+  subnets = module.vpc.public_subnet_ids
+  security_groups = [module.networking.public_sg_id]
 
+  enable_deletion_protection = false
+}
 
 resource "aws_lb" "webserver_alb" {
   name = "webserver-alb"
@@ -393,6 +357,25 @@ resource "aws_lb" "webserver_alb" {
   security_groups = [module.networking.private_sg_id]
 
   enable_deletion_protection = false
+}
+
+resource "aws_lb_target_group" "frontend_tg" {
+  name = "frontend-tg"
+  port = 80
+  protocol = "HTTP"
+  vpc_id = module.vpc.vpc_id
+
+  target_type = "ip"
+
+  health_check {
+    path = "/"
+    port = "80"
+    protocol = "HTTP"
+    healthy_threshold = 2
+    unhealthy_threshold = 3
+    interval = 15
+    timeout = 5
+  }
 }
 
 resource "aws_lb_target_group" "webserver_tg" {
@@ -411,6 +394,17 @@ resource "aws_lb_target_group" "webserver_tg" {
     unhealthy_threshold = 3
     interval = 15
     timeout = 5
+  }
+}
+
+resource "aws_lb_listener" "frontend_listener" {
+  load_balancer_arn = aws_lb.frontend_alb.arn
+  port = 80
+  protocol = "HTTP"
+
+  default_action {
+    type = "forward"
+    target_group_arn = aws_lb_target_group.frontend_tg.arn
   }
 }
 
