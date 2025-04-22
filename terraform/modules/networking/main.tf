@@ -80,6 +80,24 @@ resource "aws_internet_gateway" "my_igw" {
   }
 }
 
+resource "aws_eip" "nat_eip" {
+  count = length(var.public_subnet_cidrs)
+  domain = "vpc"
+}
+# nat_gw is subnet specific, so need multiple
+resource "aws_nat_gateway" "nat_gw" {
+  count = length(var.public_subnet_cidrs)
+  allocation_id = aws_eip.nat_eip[count.index].id
+  subnet_id = var.public_subnet_ids[count.index]
+}
+
+resource "aws_route" "private_nat_route" {
+  count = length(var.private_subnet_cidrs)
+  route_table_id = aws_route_table.private_route_table[count.index].id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id = aws_nat_gateway.nat_gw[count.index].id
+}
+
 resource "aws_route_table" "public_route_table" {
   vpc_id      = var.vpc_id
   route {
@@ -99,16 +117,17 @@ resource "aws_route_table_association" "public_subnet_association" {
 }
 
 resource "aws_route_table" "private_route_table" {
+  count = length(var.private_subnet_cidrs)
   vpc_id = var.vpc_id
   tags = {
-    Name = "PrivateRouteTable"
+    Name = "PrivateRouteTable-${count.index + 1}"
   }
 }
 
 resource "aws_route_table_association" "private_subnet_association" {
   count = length(var.private_subnet_cidrs)
   subnet_id = var.private_subnet_ids[count.index]
-  route_table_id = aws_route_table.private_route_table.id
+  route_table_id = aws_route_table.private_route_table[count.index].id
 }
 
 

@@ -17,7 +17,7 @@ resource "aws_vpc_endpoint" "s3_endpoint" {
   vpc_endpoint_type = "Gateway"
 
   # Associate this endpoint with private route table
-  route_table_ids = [var.private_route_table_id]
+  route_table_ids = var.private_route_table_ids
   tags = {
     Name = "${var.project_name}-s3-endpoint"
   }

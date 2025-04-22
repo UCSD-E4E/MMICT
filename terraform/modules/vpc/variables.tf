@@ -21,8 +21,8 @@ variable "private_subnet_cidrs" {
   type        = list(string)
 }
 
-variable "private_route_table_id" {
+variable "private_route_table_ids" {
   description = "Private route table id for vpc endpoint for s3 bucket"
-  type = string
+  type = list(string)
 }
 

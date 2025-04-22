@@ -16,7 +16,7 @@ module "vpc" {
   vpc_cidr            = var.vpc_cidr
   public_subnet_cidrs = var.public_subnet_cidrs
   private_subnet_cidrs = var.private_subnet_cidrs
-  private_route_table_id = module.networking.private_route_table_id
+  private_route_table_ids = module.networking.private_route_table_ids
 }
 
 module "networking" {
@@ -32,6 +32,7 @@ module "networking" {
 variable "key_name" {}
 variable "public_key_path" {}
 variable "service_image_urls" {}
+variable "ips_url" {}
 
 # Authentication during testing
 resource "aws_key_pair" "my_key" {
@@ -147,7 +148,8 @@ locals {
       essential = true
       env = [
         { name = "PORT", value = "3000" },
-        { name = "FRONTEND_ADDRESS", value = "${local.fe_alb_dns}:80"}
+        { name = "FRONTEND_ADDRESS", value = "${local.fe_alb_dns}:80"},
+        { name = "IP_ADDRESS", value = "${var.ips_url}"}
       ]
     }
   }
