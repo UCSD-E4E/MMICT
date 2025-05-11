@@ -149,7 +149,10 @@ locals {
       env = [
         { name = "PORT", value = "3000" },
         { name = "FRONTEND_ADDRESS", value = "${local.fe_alb_dns}:80"},
-        { name = "IP_ADDRESS", value = "${var.ips_url}"}
+        { name = "IP_ADDRESS", value = "${var.ips_url}"},
+        { name = "AWS_REGION", value = "${var.aws_region}"},
+        { name = "AWS_BUCKET_NAME", value = "${aws_s3_bucket.b.bucket}"}
+        # do not need aws access keys
       ]
     }
   }
@@ -201,6 +204,52 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
   role       = aws_iam_role.ecs_task_execution_role.name
   policy_arn = aws_iam_policy.ecr_policy.arn
 }
+
+# Task role for WS with S3 permissions
+resource "aws_iam_policy" "s3_policy" {
+  name        = "s3_access_policy"
+  description = "Policy for accessing specific S3 bucket"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Effect   = "Allow"
+        Resource = [
+          "arn:aws:s3:::${aws_s3_bucket.b.id}",
+          "arn:aws:s3:::${aws_s3_bucket.b.id}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "s3_role" {
+  name = "${var.project_name}-s3-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "s3_role_attachment" {
+  role       = aws_iam_role.s3_role.name
+  policy_arn = aws_iam_policy.s3_policy.arn
+}
+
 
 resource "aws_cloudwatch_log_group" "ecs_my_service" {
   for_each = local.services
@@ -255,7 +304,8 @@ resource "aws_ecs_task_definition" "mmict-webserver-task" {
   cpu = "256"
   memory = "256"
   execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
-  task_role_arn      = aws_iam_role.ecs_task_execution_role.arn
+  # task_role_arn      = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn      = aws_iam_role.s3_role.arn
 
   container_definitions = jsonencode([
     {

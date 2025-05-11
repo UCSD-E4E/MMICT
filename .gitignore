@@ -5,3 +5,5 @@ terraform.tfstate.backup
 terraform.tfvars
 secrets.tfvars
 terraform/volume/
+
+docker-compose.prod.yml

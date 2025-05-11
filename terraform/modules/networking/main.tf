@@ -1,3 +1,12 @@
+# EIP to attach to FE task for testing purposes
+resource "aws_eip" "frontend_task_eip" {
+  domain   = "vpc"
+
+  tags = {
+    Name = "frontend-task-eip"
+  }
+}
+
 
 resource "aws_security_group" "public_sg" {
   name        = "public-sg"
