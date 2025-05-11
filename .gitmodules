@@ -1,7 +1,7 @@
 [submodule "webserver"]
 	path = webserver
 	url = git@github.com:UCSD-E4E/MMICT-web_server.git
-	branch = main
+	branch = terraform-deployment
 [submodule "frontend"]
 	path = frontend
 	url = git@github.com:UCSD-E4E/MMICT-frontend.git
@@ -12,4 +12,4 @@
 [submodule "ip-service"]
 	path = ip-service
 	url = git@github.com:UCSD-E4E/MMICT-ip_service.git
-	branch = main
+	branch = terraform-deployment
